@@ -515,18 +515,25 @@ def live_matches():
 
     results = []
     
+    # OPTIMIZATION: Limit to 10 matches to prevent timeouts and save API limits
+    processed_count = 0
+    MAX_MATCHES = 10
+    
     for fixture in fixtures:
+        if processed_count >= MAX_MATCHES:
+            break
+            
         minute = fixture['fixture']['status']['elapsed']
         if minute is None: continue
             
         home_id = fixture['teams']['home']['id']
         away_id = fixture['teams']['away']['id']
         
+        # We use the cached averages to save API calls
         avg_home = get_team_last5_avg(home_id)
         avg_away = get_team_last5_avg(away_id)
 
-        # FIX: Only fetch stats if the teams actually fit the Under/Over profile based on defaults
-        # This prevents hitting the API limit for every single game.
+        # Filter: Only process if teams match your under/over profile
         is_under_candidate = (avg_home <= 1.5 or avg_away <= 1.5)
         is_over_candidate = (avg_home >= 1.5 or avg_away >= 1.5)
         
@@ -547,8 +554,9 @@ def live_matches():
                 "avg_away": avg_away,
                 "stats": stats
             })
+            processed_count += 1 # Increment counter only when we find a valid match
 
     return jsonify({"matches": results})
-
+           
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
