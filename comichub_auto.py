@@ -11,19 +11,20 @@ API_HOST = "v3.football.api-sports.io"
 HEADERS = {"x-rapidapi-key": API_KEY, "x-rapidapi-host": API_HOST}
 
 TEST_MODE = False 
-
 TEAM_AVG_CACHE = {}
 MATCH_STATS_CACHE = {}
 
 def get_live_fixtures():
     url = f"https://{API_HOST}/fixtures?live=all"
     try:
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         data = response.json()
         if "errors" in data and data["errors"]: 
+            print("API ERROR:", data["errors"])
             return [], data["errors"]
         return data.get("response", []), None
     except Exception as e:
+        print("Connection Error:", str(e))
         return [], str(e)
 
 def get_team_last5_avg(team_id):
@@ -34,7 +35,7 @@ def get_team_last5_avg(team_id):
 
     url = f"https://{API_HOST}/fixtures?team={team_id}&last=5"
     try:
-        matches = requests.get(url, headers=HEADERS).json().get("response", [])
+        matches = requests.get(url, headers=HEADERS, timeout=10).json().get("response", [])
         if not matches: return 0.0
         total_goals = sum([(m['goals']['home'] or 0) if m['teams']['home']['id'] == team_id else (m['goals']['away'] or 0) for m in matches])
         avg = total_goals / len(matches)
@@ -62,7 +63,7 @@ def get_match_stats(fixture_id):
     }
     
     try:
-        res = requests.get(url, headers=HEADERS).json().get("response", [])
+        res = requests.get(url, headers=HEADERS, timeout=10).json().get("response", [])
         if len(res) == 2:
             h_stats = {s['type']: s['value'] for s in res[0]['statistics']}
             a_stats = {s['type']: s['value'] for s in res[1]['statistics']}
@@ -96,8 +97,8 @@ def get_match_stats(fixture_id):
                 stats["momentum"]["away"] = 100 - stats["momentum"]["home"]
 
             MATCH_STATS_CACHE[fixture_id] = (stats, now)
-        return stats
-    except: return stats
+    except: pass
+    return stats
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -111,45 +112,30 @@ HTML_TEMPLATE = """
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-body: #0b111e; 
-            --bg-card: #151f32;
-            --bg-card-hover: #1c2940;
-            --text-main: #f8fafc; 
-            --text-muted: #8b9eb7;
-            --accent-green: #00e676; 
-            --accent-red: #ff5252; 
-            --accent-blue: #38bdf8;
-            --accent-yellow: #facc15;
+            --bg-body: #0b111e; --bg-card: #151f32; --bg-card-hover: #1c2940;
+            --text-main: #f8fafc; --text-muted: #8b9eb7;
+            --accent-green: #00e676; --accent-red: #ff5252; --accent-blue: #38bdf8; --accent-yellow: #facc15;
             --border: #22314a;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-body); color: var(--text-main); display: flex; justify-content: center; min-height: 100vh; overflow: hidden; }
-        
         .app-container { width: 100%; max-width: 500px; height: 100vh; display: flex; flex-direction: column; position: relative; padding-top: env(safe-area-inset-top, 20px); padding-bottom: env(safe-area-inset-bottom, 20px); overflow: hidden; }
-
         .view { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding-bottom: 80px; }
         .view.active { display: flex; }
-        
         .top-nav { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background: var(--bg-body); position: sticky; top: 0; z-index: 10; }
         .nav-btn { background: transparent; border: none; color: var(--text-main); font-size: 20px; cursor: pointer; display: flex; align-items: center; gap: 10px; font-weight: 600; }
         .settings-icon { font-size: 20px; color: var(--text-muted); cursor: pointer; }
-
-        /* Scanner List Cards */
         .opp-card { background: var(--bg-card); margin: 0 15px 15px; border-radius: 16px; padding: 15px; border-left: 4px solid; }
         .opp-card.under { border-color: var(--accent-green); }
         .opp-card.over { border-color: var(--accent-red); }
         .opp-card.tracking { border-color: var(--accent-yellow); opacity: 0.8; }
-        
         .opp-teams { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 16px; font-weight: 700; }
         .opp-score { background: var(--bg-body); padding: 5px 12px; border-radius: 8px; font-size: 18px; }
         .opp-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-bottom: 15px; }
-        
         .opp-market { background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px; text-align: center; font-weight: 800; font-size: 15px; margin-bottom: 10px; }
         .opp-market.under { color: var(--accent-green); }
         .opp-market.over { color: var(--accent-red); }
         .opp-market.tracking { color: var(--accent-yellow); }
-
-        /* Match Detail */
         .match-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 20px; }
         .team-col { display: flex; flex-direction: column; align-items: center; width: 30%; text-align: center; }
         .team-logo { width: 60px; height: 60px; object-fit: contain; margin-bottom: 10px; }
@@ -159,51 +145,41 @@ HTML_TEMPLATE = """
         .live-badge.tracking { background: rgba(250, 204, 21, 0.15); color: var(--accent-yellow); }
         .score-text { font-size: 36px; font-weight: 800; margin: 5px 0; }
         .match-time { font-size: 13px; color: var(--accent-green); font-weight: 600; }
-
         .prediction-box { margin: 0 20px 20px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1px solid var(--accent-yellow); border-radius: 16px; padding: 15px; text-align: center; }
         .prediction-title { font-size: 11px; color: var(--accent-yellow); text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 5px; }
         .prediction-market { font-size: 22px; font-weight: 800; color: #fff; }
         .prediction-prob { font-size: 14px; color: var(--accent-green); font-weight: 600; margin-bottom: 10px; }
         .btn-bet-main { background: var(--accent-yellow); color: #000; border: none; width: 100%; padding: 12px; border-radius: 8px; font-weight: 800; font-size: 15px; cursor: pointer; }
-
         .stat-section { margin: 0 15px 15px; background: var(--bg-card); border-radius: 16px; padding: 15px; }
         .section-title { font-size: 13px; font-weight: 700; color: var(--text-muted); margin-bottom: 15px; }
         .stat-row { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; margin-bottom: 5px; }
         .bar-container { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #000; margin-bottom: 15px; }
         .bar-home { background: var(--accent-green); transition: width 0.5s; }
         .bar-away { background: var(--accent-red); transition: width 0.5s; }
-        
         .bottom-nav { position: absolute; bottom: 0; width: 100%; display: flex; justify-content: space-around; padding: 15px 0; background: var(--bg-card); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom, 15px); }
         .nav-item { display: flex; flex-direction: column; align-items: center; color: var(--text-muted); font-size: 10px; font-weight: 600; cursor: pointer; gap: 4px; }
         .nav-item.active { color: var(--accent-green); }
         .nav-item svg { width: 20px; height: 20px; fill: currentColor; }
-        
         .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 14px; font-weight: 500; }
     </style>
 </head>
 <body>
-
     <div class="app-container">
-        
-        <!-- VIEW 1: SCANNER LIST -->
         <div class="view active" id="view-scanner">
             <div class="top-nav">
                 <div style="font-size: 18px; font-weight: 800; letter-spacing: 1px;">COMICHUB <span style="color:var(--accent-yellow)">PRO</span></div>
                 <button id="alert-btn" onclick="enableAlerts()" style="background:var(--bg-card); border:1px solid var(--border); color:#fff; padding:5px 10px; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer;">Enable Alerts</button>
             </div>
-            
             <div id="scanner-container">
                 <div class="empty-state">Scanning live matches from kickoff...</div>
             </div>
         </div>
 
-        <!-- VIEW 2: MATCH DETAIL -->
         <div class="view" id="view-detail">
             <div class="top-nav">
                 <button class="nav-btn" onclick="switchView('scanner')">← Back</button>
                 <div class="settings-icon">🔔</div>
             </div>
-
             <div class="match-header">
                 <div class="team-col">
                     <img id="d-home-logo" class="team-logo" src="" alt="Home">
@@ -219,39 +195,26 @@ HTML_TEMPLATE = """
                     <div id="d-away-name" class="team-name">Away Team</div>
                 </div>
             </div>
-
             <div class="prediction-box" id="prediction-box" style="display: none;">
                 <div class="prediction-title">Comichub Prediction</div>
                 <div id="d-market" class="prediction-market">UNDER 3.5</div>
                 <div id="d-prob" class="prediction-prob">85.0% Probability</div>
                 <button class="btn-bet-main" onclick="placeBetUI()">BET $10.00</button>
             </div>
-            
             <div class="prediction-box" id="tracking-box" style="border-color: var(--text-muted);">
                 <div class="prediction-title" style="color: var(--text-muted);">Match Tracking</div>
                 <div class="prediction-market" style="color: var(--text-muted);">WAITING FOR 60'</div>
                 <div class="prediction-prob" style="color: var(--text-muted);">Alert will trigger at 60th minute if threshold passes.</div>
             </div>
-
             <div class="stat-section">
                 <div class="section-title">Match Stats</div>
                 <div class="stat-row"><span id="d-poss-home">50%</span><span style="color:var(--text-muted); font-weight:500;">Possession</span><span id="d-poss-away">50%</span></div>
-                <div class="bar-container">
-                    <div id="bar-poss-home" class="bar-home" style="width: 50%"></div>
-                    <div id="bar-poss-away" class="bar-away" style="width: 50%"></div>
-                </div>
+                <div class="bar-container"><div id="bar-poss-home" class="bar-home" style="width: 50%"></div><div id="bar-poss-away" class="bar-away" style="width: 50%"></div></div>
                 <div class="stat-row"><span id="d-shots-home">0</span><span style="color:var(--text-muted); font-weight:500;">Shots on Target</span><span id="d-shots-away">0</span></div>
-                <div class="bar-container">
-                    <div id="bar-shots-home" class="bar-home" style="width: 50%"></div>
-                    <div id="bar-shots-away" class="bar-away" style="width: 50%"></div>
-                </div>
+                <div class="bar-container"><div id="bar-shots-home" class="bar-home" style="width: 50%"></div><div id="bar-shots-away" class="bar-away" style="width: 50%"></div></div>
                 <div class="stat-row"><span id="d-corners-home">0</span><span style="color:var(--text-muted); font-weight:500;">Corners</span><span id="d-corners-away">0</span></div>
-                <div class="bar-container">
-                    <div id="bar-corners-home" class="bar-home" style="width: 50%"></div>
-                    <div id="bar-corners-away" class="bar-away" style="width: 50%"></div>
-                </div>
+                <div class="bar-container"><div id="bar-corners-home" class="bar-home" style="width: 50%"></div><div id="bar-corners-away" class="bar-away" style="width: 50%"></div></div>
             </div>
-
             <div class="stat-section">
                 <div class="section-title">xG (Expected Goals)</div>
                 <div class="stat-row">
@@ -259,19 +222,12 @@ HTML_TEMPLATE = """
                     <span style="font-size: 11px; color: var(--text-muted);">Total: <span id="d-xg-total">0.00</span></span>
                     <span id="d-xg-away" class="xg-val-away">0.00</span>
                 </div>
-                <div class="bar-container">
-                    <div id="bar-xg-home" class="bar-home" style="width: 50%"></div>
-                    <div id="bar-xg-away" class="bar-away" style="width: 50%"></div>
-                </div>
+                <div class="bar-container"><div id="bar-xg-home" class="bar-home" style="width: 50%"></div><div id="bar-xg-away" class="bar-away" style="width: 50%"></div></div>
                 <div class="section-title" style="margin-top: 15px;">Momentum (Attacks)</div>
-                <div class="bar-container" style="height: 10px;">
-                    <div id="bar-mom-home" class="bar-home" style="width: 50%"></div>
-                    <div id="bar-mom-away" class="bar-away" style="width: 50%"></div>
-                </div>
+                <div class="bar-container" style="height: 10px;"><div id="bar-mom-home" class="bar-home" style="width: 50%"></div><div id="bar-mom-away" class="bar-away" style="width: 50%"></div></div>
             </div>
         </div>
 
-        <!-- VIEW 3: SETTINGS -->
         <div class="view" id="view-settings">
             <div class="top-nav">
                 <button class="nav-btn" onclick="switchView('scanner')">← Back</button>
@@ -286,11 +242,11 @@ HTML_TEMPLATE = """
                 </div>
                 <div style="display:flex; justify-content:space-between; margin-bottom: 10px;">
                     <span>Under Team Avg (Max)</span>
-                    <input type="number" id="set-under-filter" value="1.0" step="0.1" style="width: 60px; background: #000; color: #fff; border: 1px solid #333; text-align: right;">
+                    <input type="number" id="set-under-filter" value="1.5" step="0.1" style="width: 60px; background: #000; color: #fff; border: 1px solid #333; text-align: right;">
                 </div>
                 <div style="display:flex; justify-content:space-between;">
                     <span>Over Team Avg (Min)</span>
-                    <input type="number" id="set-over-filter" value="1.8" step="0.1" style="width: 60px; background: #000; color: #fff; border: 1px solid #333; text-align: right;">
+                    <input type="number" id="set-over-filter" value="1.5" step="0.1" style="width: 60px; background: #000; color: #fff; border: 1px solid #333; text-align: right;">
                 </div>
             </div>
             <button onclick="saveSettings()" style="margin: 20px 15px; padding: 15px; background: var(--accent-yellow); color: #000; border: none; border-radius: 10px; font-weight: 800; font-size: 16px;">Save Settings</button>
@@ -306,27 +262,21 @@ HTML_TEMPLATE = """
                 Settings
             </div>
         </div>
-
     </div>
 
 <script>
     let opportunities = [];
     let selectedMatch = null;
     let selectedMarket = null;
-    
     let minProb = parseFloat(localStorage.getItem('minProb')) || 65;
-    let underFilter = parseFloat(localStorage.getItem('underFilter')) || 1.0;
-    let overFilter = parseFloat(localStorage.getItem('overFilter')) || 1.8;
-    
-    // Alert tracking
+    let underFilter = parseFloat(localStorage.getItem('underFilter')) || 1.5;
+    let overFilter = parseFloat(localStorage.getItem('overFilter')) || 1.5;
     let alertedMatches = new Set(JSON.parse(localStorage.getItem('alertedMatches')) || []);
 
-    // --- UI ROUTING ---
     function switchView(viewId) {
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
         document.getElementById('view-' + viewId).classList.add('active');
-        
         if(viewId === 'scanner') document.querySelectorAll('.nav-item')[0].classList.add('active');
         if(viewId === 'settings') {
             document.querySelectorAll('.nav-item')[1].classList.add('active');
@@ -347,7 +297,6 @@ HTML_TEMPLATE = """
         fetchMatches();
     }
 
-    // --- NOTIFICATIONS ---
     function enableAlerts() {
         if (!("Notification" in window)) return alert("Notifications not supported.");
         Notification.requestPermission().then(permission => {
@@ -375,14 +324,11 @@ HTML_TEMPLATE = """
 
     function triggerAlert(match, market) {
         let alertId = `${match.fixture_id}-${market.type}-${market.line}`;
-        if (alertedMatches.has(alertId)) return; // Already alerted
-        
+        if (alertedMatches.has(alertId)) return;
         alertedMatches.add(alertId);
         localStorage.setItem('alertedMatches', JSON.stringify([...alertedMatches]));
-
         if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
         playSound();
-
         if (Notification.permission === "granted") {
             new Notification(`🔥 ${market.type.toUpperCase()} ${market.line} Opportunity!`, {
                 body: `${match.home_name} vs ${match.away_name} (${match.minute}')\nProb: ${(market.prob*100).toFixed(1)}%`,
@@ -390,26 +336,23 @@ HTML_TEMPLATE = """
         }
     }
 
-    // --- FETCH & RENDER ---
     async function fetchMatches() {
         try {
             const res = await fetch('/api/live-matches');
-            const data = await res.json();
+            if(!res.ok) throw new Error(await res.text());
             
+            const data = await res.json();
             opportunities = [];
+            
             if (data.matches && data.matches.length > 0) {
                 data.matches.forEach(m => {
-                    // Calculate all lines for this match
                     let bestMarkets = calculateAllLines(m.avg_home, m.avg_away, m.score_home, m.score_away, m.minute, m.stats);
                     
-                    // If match is >= 60 AND we found a market passing threshold
                     if (m.minute >= 60 && bestMarkets.length > 0) {
                         opportunities.push({ match: m, market: bestMarkets[0], isLive: true });
-                        triggerAlert(m, bestMarkets[0]); // Fire alert
+                        triggerAlert(m, bestMarkets[0]);
                     } 
-                    // If match is < 60, track it (don't calculate prob yet, just show it)
                     else if (m.minute < 60) {
-                        // We only track matches that have a chance based on pre-match averages
                         let passesAvg = (m.avg_home <= underFilter || m.avg_away <= underFilter) || (m.avg_home >= overFilter || m.avg_away >= overFilter);
                         if (passesAvg) {
                             opportunities.push({ match: m, market: { type: 'tracking', line: null, prob: 0 }, isLive: false });
@@ -417,13 +360,10 @@ HTML_TEMPLATE = """
                     }
                 });
             }
-            
-            // Sort: Live opportunities first, then tracking matches
             opportunities.sort((a, b) => b.isLive - a.isLive);
-            
             renderList();
         } catch (e) { 
-            document.getElementById('scanner-container').innerHTML = `<div class="empty-state">Error connecting to server.</div>`;
+            document.getElementById('scanner-container').innerHTML = `<div class="empty-state" style="color:var(--accent-red);">Error: ${e.message}<br><br>If you just updated the code, Render takes 50 seconds to wake up. Please refresh.</div>`;
         }
     }
 
@@ -433,15 +373,12 @@ HTML_TEMPLATE = """
             container.innerHTML = `<div class="empty-state">No matches currently meet the pre-match average filters.</div>`;
             return;
         }
-
         container.innerHTML = opportunities.map((op, index) => {
             let m = op.match;
             let mk = op.market;
             let isLive = op.isLive;
-            
             let typeClass = isLive ? (mk.type === 'under' ? 'under' : 'over') : 'tracking';
             let displayLine = isLive ? `${mk.type.toUpperCase()} ${mk.line}` : `TRACKING (${m.minute}')`;
-
             return `
                 <div class="opp-card ${typeClass}" onclick="openMatch(${index})">
                     <div class="opp-teams">
@@ -456,9 +393,6 @@ HTML_TEMPLATE = """
                     <div class="opp-market ${typeClass}">
                         ${isLive ? `${displayLine} • ${(mk.prob * 100).toFixed(1)}%` : displayLine}
                     </div>
-                    <div style="text-align:center; font-size:11px; color:var(--text-muted);">
-                        ${isLive ? 'Tap to view live stats & bet' : 'Waiting for 60th minute to calculate odds'}
-                    </div>
                 </div>
             `;
         }).join('');
@@ -468,7 +402,6 @@ HTML_TEMPLATE = """
         selectedMatch = opportunities[index].match;
         selectedMarket = opportunities[index].market;
         let isLive = opportunities[index].isLive;
-        
         let m = selectedMatch;
         let s = m.stats;
 
@@ -478,24 +411,19 @@ HTML_TEMPLATE = """
         document.getElementById('d-minute').innerText = `${m.minute}'`;
         document.getElementById('d-live-badge').innerText = isLive ? 'LIVE' : 'TRACKING';
         document.getElementById('d-live-badge').className = `live-badge ${isLive ? '' : 'tracking'}`;
-        
-        document.getElementById('d-home-logo').src = m.home_logo || `https://ui-avatars.com/api/?name=${m.home_name}&background=random&color=fff&rounded=true`;
-        document.getElementById('d-away-logo').src = m.away_logo || `https://ui-avatars.com/api/?name=${m.away_name}&background=random&color=fff&rounded=true`;
+        document.getElementById('d-home-logo').src = m.home_logo;
+        document.getElementById('d-away-logo').src = m.away_logo;
 
-        // Toggle Prediction vs Tracking Box
         if (isLive) {
             document.getElementById('prediction-box').style.display = 'block';
             document.getElementById('tracking-box').style.display = 'none';
-            
             document.getElementById('d-market').innerText = `${selectedMarket.type.toUpperCase()} ${selectedMarket.line}`;
             document.getElementById('d-prob').innerText = `${(selectedMarket.prob * 100).toFixed(1)}% Probability`;
-            document.getElementById('d-market').style.color = selectedMarket.type === 'under' ? 'var(--accent-green)' : 'var(--accent-red)';
         } else {
             document.getElementById('prediction-box').style.display = 'none';
             document.getElementById('tracking-box').style.display = 'block';
         }
 
-        // Populate Stats
         document.getElementById('d-poss-home').innerText = `${s.possession.home}%`;
         document.getElementById('d-poss-away').innerText = `${s.possession.away}%`;
         document.getElementById('bar-poss-home').style.width = `${s.possession.home}%`;
@@ -531,7 +459,6 @@ HTML_TEMPLATE = """
         switchView('scanner');
     }
 
-    // --- MATH ENGINE ---
     function factorial(n) { if(n===0||n===1) return 1; let r=1; for(let i=2;i<=n;i++) r*=i; return r; }
     function poissonPMF(k, lambda) { if(lambda<0) return 0; return (Math.exp(-lambda)*Math.pow(lambda,k))/factorial(k); }
     
@@ -539,10 +466,8 @@ HTML_TEMPLATE = """
         let scale = Math.max(0, 90 - minute) / 90.0;
         let lamHRem = lambdaHome * scale, lamARem = lambdaAway * scale;
         let totalNow = currentHome + currentAway;
-        
         let lines = [0.5, 1.5, 2.5, 3.5, 4.5];
         let results = [];
-
         let xgTotal = liveStats.xg_total || 0;
         let isHighMomentum = (xgTotal >= 1.5);
         let isLowMomentum = (xgTotal < 0.8);
@@ -550,25 +475,20 @@ HTML_TEMPLATE = """
         lines.forEach(line => {
             let maxUnder = Math.floor(line);
             let pUnder = 0, pOver = 0;
-
             for (let rh = 0; rh <= 10; rh++) {
                 for (let ra = 0; ra <= 10; ra++) {
                     let p = poissonPMF(rh, lamHRem) * poissonPMF(ra, lamARem);
                     if (totalNow + rh + ra <= maxUnder) pUnder += p; else pOver += p;
                 }
             }
-
             if (isLowMomentum) pUnder += 0.05;
             if (isHighMomentum) pOver += 0.05;
-
             let totalProb = pUnder + pOver;
             pUnder = pUnder / totalProb;
             pOver = pOver / totalProb;
-
             results.push({ line, type: 'under', prob: pUnder });
             results.push({ line, type: 'over', prob: pOver });
         });
-
         return results.filter(r => (r.prob * 100) >= minProb).sort((a, b) => b.prob - a.prob);
     }
 
@@ -591,14 +511,12 @@ def live_matches():
         return jsonify({"error": "Missing API key"}), 400
 
     fixtures, api_error = get_live_fixtures()
-    if api_error: return jsonify({"error": api_error}), 500
+    if api_error: return jsonify({"error": str(api_error)}), 500
 
     results = []
     
     for fixture in fixtures:
         minute = fixture['fixture']['status']['elapsed']
-        
-        # We no longer skip matches under 60'. We pass them so the frontend can track them.
         if minute is None: continue
             
         home_id = fixture['teams']['home']['id']
@@ -607,8 +525,12 @@ def live_matches():
         avg_home = get_team_last5_avg(home_id)
         avg_away = get_team_last5_avg(away_id)
 
-        # Only fetch matches that pass the basic pre-match average filter
-        if (avg_home <= 1.5 or avg_away <= 1.5) or (avg_home >= 1.5 or avg_away >= 1.5):
+        # FIX: Only fetch stats if the teams actually fit the Under/Over profile based on defaults
+        # This prevents hitting the API limit for every single game.
+        is_under_candidate = (avg_home <= 1.5 or avg_away <= 1.5)
+        is_over_candidate = (avg_home >= 1.5 or avg_away >= 1.5)
+        
+        if is_under_candidate or is_over_candidate:
             stats = get_match_stats(fixture['fixture']['id'])
             
             results.append({
