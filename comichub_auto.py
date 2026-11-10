@@ -6,7 +6,7 @@ from flask import Flask, render_template_string, jsonify
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
-API_KEY = os.environ.get("API_FOOTBALL_KEY")
+API_KEY = os.environ.get("API_FOOTBALL_KEY", "YOUR_API_KEY_HERE") 
 API_HOST = "v3.football.api-sports.io"
 HEADERS = {"x-rapidapi-key": API_KEY, "x-rapidapi-host": API_HOST}
 
@@ -21,12 +21,8 @@ def get_live_fixtures():
         response = requests.get(url, headers=HEADERS)
         data = response.json()
         if "errors" in data and data["errors"]: 
-            print(f"❌ API ERROR: {data['errors']}")
             return [], data["errors"]
-        
-        fixtures = data.get("response", [])
-        print(f"🌐 API Success: Found {len(fixtures)} live matches globally.")
-        return fixtures, None
+        return data.get("response", []), None
     except Exception as e:
         return [], str(e)
 
@@ -53,15 +49,28 @@ def get_match_stats(fixture_id):
         if now - timestamp < 120: return cached_stats
         
     url = f"https://{API_HOST}/fixtures/statistics?fixture={fixture_id}"
-    stats = {"possession": "0% - 0%", "shots": "0 - 0", "dangerous": "0 - 0"}
+    stats = {"possession": "0% - 0%", "shots": "0 - 0", "dangerous": "0 - 0", "xg": "0.0 - 0.0"}
     try:
         res = requests.get(url, headers=HEADERS).json().get("response", [])
         if len(res) == 2:
             home_stats = {s['type']: s['value'] for s in res[0]['statistics']}
             away_stats = {s['type']: s['value'] for s in res[1]['statistics']}
+            
             stats['possession'] = f"{home_stats.get('Ball Possession', '0%')} - {away_stats.get('Ball Possession', '0%')}"
             stats['shots'] = f"{home_stats.get('Shots on Goal', 0)} - {away_stats.get('Shots on Goal', 0)}"
             stats['dangerous'] = f"{home_stats.get('Dangerous Attacks', 0)} - {away_stats.get('Dangerous Attacks', 0)}"
+            
+            # Premium Plan usually has xG
+            xg_home = home_stats.get('expected_goals', 0)
+            xg_away = away_stats.get('expected_goals', 0)
+            
+            # Formatting xG (handle None/Nulls)
+            if xg_home is None: xg_home = 0
+            if xg_away is None: xg_away = 0
+            
+            stats['xg'] = f"{xg_home} - {xg_away}"
+            stats['xg_float'] = float(xg_home) + float(xg_away)
+            
             MATCH_STATS_CACHE[fixture_id] = (stats, now)
         return stats
     except: return stats
@@ -123,14 +132,23 @@ HTML_TEMPLATE = """
         .match-container { margin: 0 16px 15px; background: var(--bg-box); border-radius: 12px; padding: 15px; border: 1px solid var(--border); }
         .match-container.under { border-color: var(--accent-green); }
         .match-container.over { border-color: var(--accent-red); }
+        
         .mc-title { font-size: 11px; font-weight: 800; text-transform: uppercase; margin-bottom: 10px; text-align: center; letter-spacing: 1px; }
         .mc-title.under { color: var(--accent-green); }
         .mc-title.over { color: var(--accent-red); }
+        
         .teams-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
         .team-name { font-size: 14px; font-weight: 600; width: 40%; text-align: center; }
         .score { font-size: 22px; font-weight: 800; background: var(--bg-panel); padding: 6px 14px; border-radius: 6px; }
+        
         .league-name { text-align: center; font-size: 10px; color: var(--text-muted); font-weight: 600; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-        .lm-stats { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 15px; border-top: 1px solid var(--border); padding-top: 10px; }
+        
+        /* Live Advanced Stats Grid */
+        .lm-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px; border-top: 1px solid var(--border); padding-top: 10px; }
+        .lm-stat-item { background: var(--bg-panel); padding: 8px; border-radius: 6px; text-align: center; }
+        .lm-stat-label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; }
+        .lm-stat-val { font-size: 12px; font-weight: 600; color: var(--text-main); margin-top: 2px; }
+
         .btn-bet { width: 100%; padding: 12px; border-radius: 8px; border: none; font-size: 14px; font-weight: 800; cursor: pointer; margin-top: 10px; }
         .btn-bet.under { background: var(--accent-green); color: #000; }
         .btn-bet.over { background: var(--accent-red); color: #fff; }
@@ -146,8 +164,8 @@ HTML_TEMPLATE = """
         .actions { padding: 0 16px 20px; display: flex; flex-direction: column; gap: 10px; }
         .prob-display-box { border: 1px solid var(--accent-yellow); color: var(--accent-yellow); padding: 12px; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: center; background: rgba(250, 204, 21, 0.05); }
         .btn-main { background: var(--accent-yellow); color: #000; border: none; padding: 16px; border-radius: 8px; font-size: 16px; font-weight: 700; cursor: pointer; }
-        .btn-sec { background: transparent; color: var(--text-muted); border: 1px solid var(--border); padding: 14px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
 
+        /* Settings */
         .content-pad { padding: 20px 16px; display: flex; flex-direction: column; gap: 20px; }
         .setting-group { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 15px; }
         .setting-title { font-size: 14px; font-weight: 700; color: var(--accent-yellow); margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
@@ -155,7 +173,6 @@ HTML_TEMPLATE = """
         .setting-row:last-child { margin-bottom: 0; }
         .setting-label { font-size: 13px; font-weight: 600; color: var(--text-main); }
         .setting-input { background: var(--bg-box); border: 1px solid var(--border); color: var(--text-main); padding: 6px 10px; border-radius: 6px; width: 80px; text-align: right; font-weight: 700; }
-        .btn-action { width: 100%; padding: 12px; background: var(--bg-box); color: var(--text-main); border: 1px solid var(--border); border-radius: 8px; font-weight: 700; cursor: pointer; margin-top: 10px; }
 
         .history-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
         .history-item:last-child { border-bottom: none; }
@@ -174,11 +191,10 @@ HTML_TEMPLATE = """
             <div class="logo-area">
                 <div class="logo-icon"></div>
                 <div class="logo-text">COMICHUB</div>
-                <div class="real-badge">REAL</div>
+                <div class="real-badge">PRO</div>
             </div>
             <div class="controls">
                 <span class="theme-toggle" onclick="toggleTheme()" id="theme-icon">☀️</span>
-                <span>⏸</span>
             </div>
         </div>
 
@@ -238,19 +254,37 @@ HTML_TEMPLATE = """
 
         <div class="view" id="view-settings">
             <div class="content-pad">
+                <!-- MARKET THRESHOLDS -->
                 <div class="setting-group">
-                    <div class="setting-title">Market</div>
+                    <div class="setting-title">Pre-Match Thresholds</div>
                     <div class="setting-row">
-                        <div class="setting-label">Min Under Prob (%)</div>
-                        <input type="number" class="setting-input" id="set-min-prob" value="65">
-                    </div>
-                    <div class="setting-row">
-                        <div class="setting-label">Under Filter Max</div>
+                        <div class="setting-label">Under Filter (Max Avg)</div>
                         <input type="number" step="0.1" class="setting-input" id="set-under-filter" value="1.0">
                     </div>
                     <div class="setting-row">
-                        <div class="setting-label">Over Filter Min</div>
+                        <div class="setting-label">Over Filter (Min Avg)</div>
                         <input type="number" step="0.1" class="setting-input" id="set-over-filter" value="1.8">
+                    </div>
+                </div>
+
+                <!-- LIVE DECISION FACTORS -->
+                <div class="setting-group">
+                    <div class="setting-title">Live Market Validation</div>
+                    <div class="setting-row">
+                        <div class="setting-label">Min Under Prob (%)</div>
+                        <input type="number" class="setting-input" id="set-min-under-prob" value="65">
+                    </div>
+                    <div class="setting-row">
+                        <div class="setting-label">Min Over Prob (%)</div>
+                        <input type="number" class="setting-input" id="set-min-over-prob" value="65">
+                    </div>
+                    <div class="setting-row">
+                        <div class="setting-label">xG Trigger (Over)</div>
+                        <input type="number" step="0.1" class="setting-input" id="set-xg-over" value="1.5">
+                    </div>
+                    <div class="setting-row">
+                        <div class="setting-label">Shots on Target (Over)</div>
+                        <input type="number" step="1" class="setting-input" id="set-shots-over" value="8">
                     </div>
                 </div>
 
@@ -264,12 +298,6 @@ HTML_TEMPLATE = """
                         <div class="setting-label">Min Odds (Target)</div>
                         <input type="number" step="0.01" class="setting-input" id="set-min-odds" value="1.06">
                     </div>
-                </div>
-
-                <div class="setting-group">
-                    <div class="setting-title">Data Management</div>
-                    <button class="btn-action" onclick="backupData()">Backup Data</button>
-                    <button class="btn-action" onclick="restoreData()">Restore Data</button>
                 </div>
             </div>
         </div>
@@ -293,11 +321,17 @@ HTML_TEMPLATE = """
     let nextStake = parseFloat(localStorage.getItem('nextStake')) || 10.00;
     let history = JSON.parse(localStorage.getItem('history')) || [];
     
+    // Default Settings
     let maxStakes = parseInt(localStorage.getItem('maxStakes')) || 6;
     let minOdds = parseFloat(localStorage.getItem('minOdds')) || 1.06;
-    let minProb = parseFloat(localStorage.getItem('minProb')) || 65;
     let underFilter = parseFloat(localStorage.getItem('underFilter')) || 1.0;
     let overFilter = parseFloat(localStorage.getItem('overFilter')) || 1.8;
+    
+    // New Live Stats Thresholds
+    let minUnderProb = parseFloat(localStorage.getItem('minUnderProb')) || 65;
+    let minOverProb = parseFloat(localStorage.getItem('minOverProb')) || 65;
+    let xgOverTrigger = parseFloat(localStorage.getItem('xgOverTrigger')) || 1.5;
+    let shotsOverTrigger = parseFloat(localStorage.getItem('shotsOverTrigger')) || 8;
 
     let lastPlayedDate = localStorage.getItem('lastPlayedDate');
     let today = new Date().toDateString();
@@ -342,23 +376,32 @@ HTML_TEMPLATE = """
     function loadSettingsUI() {
         document.getElementById('set-max-stakes').value = maxStakes;
         document.getElementById('set-min-odds').value = minOdds;
-        document.getElementById('set-min-prob').value = minProb;
         document.getElementById('set-under-filter').value = underFilter;
         document.getElementById('set-over-filter').value = overFilter;
+        document.getElementById('set-min-under-prob').value = minUnderProb;
+        document.getElementById('set-min-over-prob').value = minOverProb;
+        document.getElementById('set-xg-over').value = xgOverTrigger;
+        document.getElementById('set-shots-over').value = shotsOverTrigger;
     }
 
     function saveSettings() {
         maxStakes = parseInt(document.getElementById('set-max-stakes').value) || 6;
         minOdds = parseFloat(document.getElementById('set-min-odds').value) || 1.06;
-        minProb = parseFloat(document.getElementById('set-min-prob').value) || 65;
         underFilter = parseFloat(document.getElementById('set-under-filter').value) || 1.0;
         overFilter = parseFloat(document.getElementById('set-over-filter').value) || 1.8;
+        minUnderProb = parseFloat(document.getElementById('set-min-under-prob').value) || 65;
+        minOverProb = parseFloat(document.getElementById('set-min-over-prob').value) || 65;
+        xgOverTrigger = parseFloat(document.getElementById('set-xg-over').value) || 1.5;
+        shotsOverTrigger = parseFloat(document.getElementById('set-shots-over').value) || 8;
 
         localStorage.setItem('maxStakes', maxStakes);
         localStorage.setItem('minOdds', minOdds);
-        localStorage.setItem('minProb', minProb);
         localStorage.setItem('underFilter', underFilter);
         localStorage.setItem('overFilter', overFilter);
+        localStorage.setItem('minUnderProb', minUnderProb);
+        localStorage.setItem('minOverProb', minOverProb);
+        localStorage.setItem('xgOverTrigger', xgOverTrigger);
+        localStorage.setItem('shotsOverTrigger', shotsOverTrigger);
         
         updateUI();
         fetchMatches(); 
@@ -429,18 +472,50 @@ HTML_TEMPLATE = """
 
     function factorial(n) { if(n===0||n===1) return 1; let r=1; for(let i=2;i<=n;i++) r*=i; return r; }
     function poissonPMF(k, lambda) { if(lambda<0) return 0; return (Math.exp(-lambda)*Math.pow(lambda,k))/factorial(k); }
-    function calcProb(lambdaHome, lambdaAway, currentHome, currentAway, minute) {
-        let scale = Math.max(0, 90 - minute) / 90.0;
-        let lamHRem = lambdaHome * scale, lamARem = lambdaAway * scale;
-        let totalNow = currentHome + currentAway;
+    
+    // Upgraded Math Engine with xG & Momentum
+    function evaluateMarket(match) {
+        let scale = Math.max(0, 90 - match.minute) / 90.0;
+        let lamHRem = match.avg_home * scale, lamARem = match.avg_away * scale;
+        let totalNow = match.score_home + match.score_away;
         let pUnder = 0, pOver = 0;
+        
+        // 1. Base Poisson
         for (let rh = 0; rh <= 10; rh++) {
             for (let ra = 0; ra <= 10; ra++) {
                 let p = poissonPMF(rh, lamHRem) * poissonPMF(ra, lamARem);
                 if (totalNow + rh + ra <= 3) pUnder += p; else pOver += p;
             }
         }
-        return { under: pUnder, over: pOver };
+
+        // 2. Extract Live Stats for Validation
+        let xgTotal = parseFloat(match.stats.xg_float) || 0;
+        let shotsStr = match.stats.shots.split(' - ');
+        let shotsTotal = (parseInt(shotsStr[0]) || 0) + (parseInt(shotsStr[1]) || 0);
+        let dangerousStr = match.stats.dangerous.split(' - ');
+        let dangerousTotal = (parseInt(dangerousStr[0]) || 0) + (parseInt(dangerousStr[1]) || 0);
+
+        // 3. Market Verdict Logic
+        let verdict = "NEUTRAL";
+        
+        // If it's a low-scoring game with low stats at 60+, Under is heavily supported
+        if (xgTotal < 0.8 && shotsTotal < 5 && totalNow <= 1) {
+            pUnder += 0.10; // Boost Under confidence
+            verdict = "🛡️ UNDER SAFE";
+        }
+        
+        // If xG is high but goals aren't there yet (bad finishing), or it's an end-to-end game
+        if (xgTotal >= xgOverTrigger || shotsTotal >= shotsOverTrigger) {
+            pOver += 0.15; // Boost Over confidence
+            verdict = "🔥 OVER DANGER";
+        }
+
+        // Normalize
+        let totalProb = pUnder + pOver;
+        pUnder = pUnder / totalProb;
+        pOver = pOver / totalProb;
+
+        return { under: pUnder, over: pOver, verdict: verdict, xgTotal, shotsTotal };
     }
 
     async function fetchMatches() {
@@ -460,13 +535,15 @@ HTML_TEMPLATE = """
 
             if (data.matches && data.matches.length > 0) {
                 data.matches.forEach(m => {
-                    let probs = calcProb(m.avg_home, m.avg_away, m.score_home, m.score_away, m.minute);
+                    let evalData = evaluateMarket(m);
                     
-                    if ((m.avg_home <= underFilter || m.avg_away <= underFilter) && (probs.under * 100) >= minProb) {
-                        if(!underMatch) underMatch = { ...m, prob: probs.under };
+                    // UNDER CONDITION
+                    if ((m.avg_home <= underFilter || m.avg_away <= underFilter) && (evalData.under * 100) >= minUnderProb) {
+                        if(!underMatch) underMatch = { ...m, prob: evalData.under, verdict: evalData.verdict };
                     }
-                    if ((m.avg_home >= overFilter || m.avg_away >= overFilter) && (probs.over * 100) >= minProb) {
-                        if(!overMatch) overMatch = { ...m, prob: probs.over };
+                    // OVER CONDITION
+                    if ((m.avg_home >= overFilter || m.avg_away >= overFilter) && (evalData.over * 100) >= minOverProb) {
+                        if(!overMatch) overMatch = { ...m, prob: evalData.over, verdict: evalData.verdict };
                     }
                 });
             }
@@ -496,20 +573,23 @@ HTML_TEMPLATE = """
 
         container.innerHTML = `
             <div class="match-container ${type}">
-                <div class="mc-title ${type}">${type.toUpperCase()} 3.5 OPPORTUNITY</div>
+                <div class="mc-title ${type}">${match.verdict}</div>
                 <div class="teams-row">
                     <div class="team-name">${match.home_name}</div>
                     <div class="score">${match.score_home} - ${match.score_away}</div>
                     <div class="team-name">${match.away_name}</div>
                 </div>
                 <div class="league-name">${match.league_name} • ${match.minute}'</div>
+                
                 <div class="lm-stats">
-                    <span>Poss: ${match.stats.possession}</span>
-                    <span>Shots: ${match.stats.shots}</span>
-                    <span>Danger: ${match.stats.dangerous}</span>
+                    <div class="lm-stat-item"><div class="lm-stat-label">xG (Expected)</div><div class="lm-stat-val">${match.stats.xg}</div></div>
+                    <div class="lm-stat-item"><div class="lm-stat-label">Shots on Target</div><div class="lm-stat-val">${match.stats.shots}</div></div>
+                    <div class="lm-stat-item"><div class="lm-stat-label">Danger Attacks</div><div class="lm-stat-val">${match.stats.dangerous}</div></div>
+                    <div class="lm-stat-item"><div class="lm-stat-label">Possession</div><div class="lm-stat-val">${match.stats.possession}</div></div>
                 </div>
+
                 <button class="btn-bet ${type}" onclick="placeBet('${type}', ${match.fixture_id}, ${match.prob})">
-                    BET $${nextStake.toFixed(2)} ON ${type.toUpperCase()}
+                    BET $${nextStake.toFixed(2)} ON ${type.toUpperCase()} (${(match.prob * 100).toFixed(1)}%)
                 </button>
             </div>
         `;
@@ -569,8 +649,7 @@ def index():
 
 @app.route('/api/live-matches')
 def live_matches():
-    if API_KEY == "YOUR_API_KEY_HERE": 
-        print("⚠️ ERROR: You did not paste your API Key in the code!")
+    if API_KEY == "YOUR_API_KEY_HERE" or not API_KEY: 
         return jsonify({"error": "Missing API key"}), 400
 
     fixtures, api_error = get_live_fixtures()
@@ -594,10 +673,8 @@ def live_matches():
         avg_home = get_team_last5_avg(home_id)
         avg_away = get_team_last5_avg(away_id)
 
-        if TEST_MODE or (avg_home <= 1.0 or avg_away <= 1.0) or (avg_home >= 1.8 or avg_away >= 1.8):
+        if TEST_MODE or (avg_home <= 1.5 or avg_away <= 1.5) or (avg_home >= 1.5 or avg_away >= 1.5):
             valid_matches_count += 1
-            print(f"✅ Match Found: {fixture['teams']['home']['name']} vs {fixture['teams']['away']['name']} ({minute}') - Fetching Stats...")
-            
             stats = get_match_stats(fixture['fixture']['id'])
             
             results.append({
@@ -613,7 +690,6 @@ def live_matches():
                 "stats": stats
             })
 
-    print(f"📊 Scan Complete: {len(fixtures)} live matches -> {valid_matches_count} passed the filter.")
     return jsonify({"matches": results})
 
 if __name__ == '__main__':
